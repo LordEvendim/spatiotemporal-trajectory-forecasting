@@ -1,7 +1,9 @@
 import urllib.request
+import ssl
 from pathlib import Path
 from typing import Tuple, Optional, List
 import numpy as np
+import scipy.io
 from scipy.signal import butter, filtfilt
 import mne
 from tqdm import tqdm
@@ -48,24 +50,74 @@ class BCIDataLoader:
         if subjects is None:
             subjects = self.SUBJECTS
 
+        # Create unverified SSL context to bypass certificate verification issues
+        ssl_context = ssl._create_unverified_context()
+
         print(f"Downloading BCI Competition IV Dataset 2a to {self.data_dir}")
         for subject in tqdm(subjects, desc="Downloading subjects"):
             for session in self.SESSIONS:
-                filename = f"{subject}{session}.gdf"
+                filename = f"{subject}{session}.mat"
                 filepath = self.data_dir / filename
                 if filepath.exists():
                     continue
                 url = f"{self.BASE_URL}{filename}"
                 try:
-                    urllib.request.urlretrieve(url, filepath)
+                    with urllib.request.urlopen(url, context=ssl_context) as response, \
+                         open(filepath, "wb") as out_file:
+                        out_file.write(response.read())
                 except Exception as e:
                     print(f"Error downloading {filename}: {e}")
 
-    def load_gdf_file(self, filepath: str) -> Tuple[np.ndarray, np.ndarray, int]:
-        raw = mne.io.read_raw_gdf(filepath, preload=True, verbose=False)
-        data = raw.get_data()[:22]
-        events, _ = mne.events_from_annotations(raw, verbose=False)
-        sfreq = int(raw.info["sfreq"])
+    def load_mat_file(self, filepath: str) -> Tuple[np.ndarray, np.ndarray, int]:
+        """Load data from .mat file, extracting raw EEG and events."""
+        mat = scipy.io.loadmat(filepath, struct_as_record=True)
+        data_struct = mat['data']
+        
+        X_list = []
+        events_list = []
+        offset = 0
+        
+        # Iterate over all runs (usually 9 runs)
+        for i in range(data_struct.shape[1]):
+            run = data_struct[0, i]
+            
+            # Extract raw data (Timepoints x Channels)
+            # Original GDF has 22 EEG + 3 EOG. We keep all for now, slice later if needed
+            # or slice strictly to 22 here as in original code (data[:22])
+            run_X = run['X'][0, 0]
+            
+            # Extract events if available
+            if 'trial' in run.dtype.names and 'y' in run.dtype.names:
+                run_trial = run['trial'][0, 0].flatten()
+                run_y = run['y'][0, 0].flatten()
+                
+                if run_trial.size > 0:
+                    # Create events array: [sample_index, 0, label]
+                    # Note: MATLAB is 1-based, Python is 0-based. Subtract 1 from index.
+                    current_events = np.column_stack((
+                        run_trial - 1 + offset, 
+                        np.zeros_like(run_trial, dtype=int), 
+                        run_y
+                    ))
+                    events_list.append(current_events)
+            
+            X_list.append(run_X)
+            offset += run_X.shape[0]
+            
+        # Concatenate all runs
+        # X shape became (Total_Timepoints, 25).
+        # We need (22, Total_Timepoints) to match original mne.get_data()[:22] behavior
+        data_full = np.concatenate(X_list, axis=0)
+        data = data_full[:, :22].T  # Transpose to (Channels, Timepoints)
+        
+        if events_list:
+            events = np.concatenate(events_list, axis=0)
+        else:
+            events = np.array([])
+            
+        # Sampling rate is usually 250Hz for this dataset
+        sfreq = 250
+            
         return data, events, sfreq
 
     def bandpass_filter(
@@ -126,11 +178,11 @@ class BCIDataLoader:
         lowcut: float = 0.5,
         highcut: float = 100.0,
     ) -> Tuple[np.ndarray, np.ndarray, dict]:
-        filepath = self.data_dir / f"{subject}{session}.gdf"
+        filepath = self.data_dir / f"{subject}{session}.mat"
         if not filepath.exists():
             self.download_dataset([subject])
 
-        data, events, sfreq = self.load_gdf_file(str(filepath))
+        data, events, sfreq = self.load_mat_file(str(filepath))
         data_filtered = self.bandpass_filter(data, lowcut, highcut, sfreq)
 
         # Z-score normalization per channel

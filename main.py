@@ -87,7 +87,7 @@ def main():
     parser = argparse.ArgumentParser(description="EEG Signal Forecasting")
 
     # Data
-    parser.add_argument("--use-dummy-data", action="store_true", default=True)
+    parser.add_argument("--use-dummy-data", action="store_true", default=False)
     parser.add_argument("--data-dir", type=str, default="data")
     parser.add_argument("--subject", type=str, default="A01")
     parser.add_argument("--n-samples", type=int, default=20000)
