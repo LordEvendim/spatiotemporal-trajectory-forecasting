@@ -33,12 +33,20 @@ def load_data(args):
         print("Using synthetic EEG-like data...")
         X, y = create_dummy_data(args.n_samples, 22, args.seq_length, args.pred_length)
     else:
-        print(f"Loading BCI data for subject {args.subject}...")
         loader = BCIDataLoader(data_dir=args.data_dir)
         try:
-            X, y, _ = loader.load_and_preprocess(
-                args.subject, "T", args.seq_length, args.pred_length, args.stride
-            )
+            if args.all_subjects:
+                print("Loading BCI data for ALL subjects (sessions T and E)...")
+                X, y = loader.load_multiple_subjects(
+                    seq_length=args.seq_length, 
+                    pred_length=args.pred_length, 
+                    stride=args.stride
+                )
+            else:
+                print(f"Loading BCI data for subject {args.subject}...")
+                X, y, _ = loader.load_and_preprocess(
+                    args.subject, "T", args.seq_length, args.pred_length, args.stride
+                )
         except Exception as e:
             print(f"Error: {e}. Falling back to synthetic data...")
             X, y = create_dummy_data(
@@ -88,6 +96,7 @@ def main():
 
     # Data
     parser.add_argument("--use-dummy-data", action="store_true", default=False)
+    parser.add_argument("--all-subjects", action="store_true", help="Use all subjects and sessions")
     parser.add_argument("--data-dir", type=str, default="data")
     parser.add_argument("--subject", type=str, default="A01")
     parser.add_argument("--n-samples", type=int, default=20000)

@@ -205,19 +205,25 @@ class BCIDataLoader:
         return X, y, band_data
 
     def load_multiple_subjects(
-        self, subjects: Optional[List[str]] = None, session: str = "T", **kwargs
+        self, subjects: Optional[List[str]] = None, sessions: Optional[List[str]] = None, **kwargs
     ) -> Tuple[np.ndarray, np.ndarray]:
         if subjects is None:
             subjects = self.SUBJECTS
+        if sessions is None:
+            sessions = self.SESSIONS
 
         all_X, all_y = [], []
         for subject in tqdm(subjects, desc="Loading subjects"):
-            try:
-                X, y, _ = self.load_and_preprocess(subject, session, **kwargs)
-                all_X.append(X)
-                all_y.append(y)
-            except Exception as e:
-                print(f"Error loading {subject}: {e}")
+            for session in sessions:
+                try:
+                    X, y, _ = self.load_and_preprocess(subject, session, **kwargs)
+                    all_X.append(X)
+                    all_y.append(y)
+                except Exception as e:
+                    print(f"Error loading {subject} session {session}: {e}")
+
+        if not all_X:
+            raise RuntimeError("No data loaded successfully!")
 
         return np.concatenate(all_X, axis=0), np.concatenate(all_y, axis=0)
 
